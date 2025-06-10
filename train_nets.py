@@ -8,10 +8,10 @@ from src.utils.train import train_module
 @hydra.main(version_base=None, config_path="config", config_name="nets_config")
 def main(cfg: DictConfig):
     cfg = cfg.nets_config
-    pinn = NETSModule(cfg)
+    nets_module = NETSModule(cfg)
 
     train_module(
-        module=pinn,
+        module=nets_module,
         run_name=cfg.run_name,
         run_group=cfg.run_group,
         max_epochs=cfg.max_epochs,

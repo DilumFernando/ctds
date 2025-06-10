@@ -13,9 +13,7 @@ from src.utils.train import train_module
 def main(cfg: DictConfig):
     cfg = cfg.ctds_config
     ctds_module = CTDSModule(cfg)
-    breakpoint()
 
-    print(cfg)
     train_module(
         module=ctds_module,
         run_name=cfg.run_name,
