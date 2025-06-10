@@ -1,0 +1,9 @@
+pyrightconfig.json
+outputs/
+*__pycache__/
+*.ipynb_checkpoints/
+checkpoints/
+lightning_logs/
+local/
+workdir/
+

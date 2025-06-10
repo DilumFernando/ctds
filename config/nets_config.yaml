@@ -1,0 +1,2 @@
+defaults:
+  - nets_config: ${oc.env:RUN_CONFIG}

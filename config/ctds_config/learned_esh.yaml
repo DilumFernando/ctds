@@ -1,0 +1,92 @@
+# Implementation of CTDS on the 40-mode GMM from FAB
+
+# Run details
+run_name: ctds_learned_tempered_unnamed
+run_group: ctds
+wandb: false
+wandb_project: ${oc.env:WANDB_PROJECT, null}
+checkpoint: null
+
+# Objective details
+x_dim: 2
+mt_continuum: learnable_linear
+learnable_hiddens: [256, 256, 256]
+target: fab_gmm
+cov_scale: 0.25
+source_std: 5.0
+
+# Training details
+num_devices: 1
+max_epochs: 800
+lr: 0.002
+lr_burn_in_epochs: 150
+step_size: 5
+gamma: 0.97
+checkpoint_burn_in_epochs: 150
+
+# Batching details
+use_persistent_sample_buffer: true
+persistent_sample_buffer_trajectories: 2000
+train_batch_size: 6250
+train_steps_per_epoch: 100
+val_trajectories: 1000
+val_steps_per_epoch: 2
+val_freq: 5
+
+# PINN-specific training details
+annealing_scheduler: manual
+T_schedule: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+epochs_per_T: [10, 10, 10, 10, 20, 20, 20, 30, 30, 30]
+avg_dt: 0.002
+record_every: 20
+divergence_mode: autograd
+
+# Control-specific details
+x_control: mlp
+x_control_hiddens: [256, 256, 256]
+
+# Free-energy specific details
+free_energy: mlp
+free_energy_hiddens: [256, 256, 256]
+
+# Time-encoding details
+use_fourier: true
+x_fourier_dim: 100
+x_fourier_sigma: 0.1
+b_fourier_dim: 20
+b_fourier_sigma: 1
+t_fourier_dim: 20
+t_fourier_sigma: 5
+
+# Proposal details
+proposal: underdamped_ctds
+x_scale: 50.0
+z_scale: 5.0
+x_damping: 0.0
+z_damping: 2.0
+hamiltonian_type: esh
+x_mass: 15.0
+z_mass: 1.0
+beta_min: 0.2
+beta_max: 1.0
+use_jarzynski: false,
+
+# Reparameterization details
+converter: polynomial
+z_lower_bound: -2.0
+z_upper_bound: 2.0
+delta: 0.25
+delta_prime: 1.9
+s: 0.8
+enforce_z_bounds: false
+
+# Confining potential details
+confining_sharpness: 10.0
+confining_lower_bound: -2.0
+confining_upper_bound: 2.0
+
+# Biasing details
+biasing_density: zero
+
+# Debug
+verbose: false
