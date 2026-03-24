@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nets-standalone"
+version = "0.1.0"
+description = "Minimal standalone NETS implementation with pure PyTorch training."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "pot>=0.9",
+  "torch>=2.1",
+  "tqdm>=4.66",
+]
+
+[project.scripts]
+nets-train = "nets.train:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
