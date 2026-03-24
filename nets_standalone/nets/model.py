@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from abc import ABC, abstractmethod
+from functools import wraps
 from typing import Dict, Optional
 
 import numpy as np
@@ -9,14 +10,31 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
+from .base import module_device
 from .config import Config
 from .density_paths import DensityPath, build_density_path
 from .dynamics import AuxiliaryProcess, DivegenceAuxiliaryProcess, ODEProcess
 from .langevin import AnnealedOverdampedLangevin
-from .metrics import MAX_LOG_WEIGHT, ess, w2_from_samples
-from .misc import BYTES_PER_GIB, cuda_profile, get_module_device
+from .metrics import MAX_LOG_WEIGHT, ess, normalize_log_weights, w2_from_samples
 from .nn import FeedForward, GaussianFourierEncoder
 from .vector_fields import MLPVectorField, VectorField
+
+BYTES_PER_GIB = 1024 * 1024 * 1024
+
+
+def cuda_profile(fn):
+    @wraps(fn)
+    def wrapper(*args, profile: bool = False, **kwargs):
+        if profile and torch.cuda.is_available():
+            start_bytes = torch.cuda.memory_allocated()
+            result = fn(*args, **kwargs)
+            end_bytes = torch.cuda.memory_allocated()
+            gib = (end_bytes - start_bytes) / BYTES_PER_GIB
+            print(f"Call to {fn.__name__} used {gib:.3f} GiB of memory")
+            return result
+        return fn(*args, **kwargs)
+
+    return wrapper
 
 
 class DtFreeEnergy(nn.Module, ABC):
@@ -107,6 +125,14 @@ class ODEProposal(PINNProposal):
 
         target_samples = self.target_sampleable.sample(model_samples.shape[0]).to(model_samples)
         metrics[f"{label}_w2"] = w2_from_samples(model_samples, target_samples).item()
+        model_sample_weights = normalize_log_weights(log_model_weights).to(model_samples)
+        target_sample_weights = torch.ones(target_samples.shape[0], device=target_samples.device) / target_samples.shape[0]
+        metrics[f"{label}_weighted_w2"] = w2_from_samples(
+            model_samples,
+            target_samples,
+            p_weights=model_sample_weights,
+            q_weights=target_sample_weights,
+        ).item()
 
         reverse_ts = ts.flip(1)
         x0, aux_dict = self.dynamics.sample(ts=reverse_ts, x0=target_samples)
@@ -207,7 +233,7 @@ class NETSModel(nn.Module):
 
     def get_integration_ts(self, T: float) -> Tensor:
         num_integration_steps = math.ceil(T / self.integration_avg_dt)
-        integration_ts = T * torch.sort(torch.rand(num_integration_steps - 1, device=get_module_device(self))).values
+        integration_ts = T * torch.sort(torch.rand(num_integration_steps - 1, device=module_device(self))).values
         integration_ts = torch.cat(
             [
                 torch.zeros(1, device=integration_ts.device),
@@ -244,7 +270,7 @@ class NETSModel(nn.Module):
 
     def replenish_sample_buffer(self, num_trajectories: int, proposal_type: str, T: float) -> Dict[str, Tensor]:
         integration_ts = self.get_integration_ts(T).unsqueeze(0).expand(num_trajectories, -1, 1)
-        proposal = self.build_proposal(proposal_type).to(get_module_device(self))
+        proposal = self.build_proposal(proposal_type).to(module_device(self))
         xs, ts, log_weights = proposal.sample(ts=integration_ts)
         weights = self.extract_weights(log_weights)
         return {
@@ -292,12 +318,28 @@ class NETSModel(nn.Module):
             weights.reshape(-1, 1).detach().clone(),
         )
 
+    def compute_validation_loss(self) -> Tensor:
+        sample_buffer = self.replenish_sample_buffer(
+            num_trajectories=int(self.cfg.val_trajectories),
+            proposal_type="overdamped_langevin",
+            T=1.0,
+        )
+        return self.pinn_loss(
+            sample_buffer["xs"].reshape(-1, self.x_dim).detach().clone(),
+            sample_buffer["ts"].reshape(-1, 1).detach().clone(),
+            sample_buffer["weights"].reshape(-1, 1).detach().clone(),
+        )
+
     @torch.no_grad()
     def validate(self) -> Dict[str, float]:
-        proposal = self.build_proposal("ode").to(get_module_device(self))
-        ode_ts = torch.linspace(0, 1, 250, device=get_module_device(self)).view(1, -1, 1)
+        device = module_device(self)
+        val_loss = self.compute_validation_loss().item()
+        proposal = self.build_proposal("ode").to(device)
+        ode_ts = torch.linspace(0, 1, 250, device=device).view(1, -1, 1)
         ode_ts = ode_ts.expand(int(self.cfg.val_trajectories), -1, 1)
-        return proposal.get_metrics(ts=ode_ts, label="val")
+        metrics = proposal.get_metrics(ts=ode_ts, label="val")
+        metrics["val_loss"] = float(val_loss)
+        return metrics
 
     def memory_delta_gib(self, start_bytes: int, end_bytes: int) -> float:
         return (end_bytes - start_bytes) / BYTES_PER_GIB

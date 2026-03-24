@@ -1,14 +1,29 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from functools import wraps
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 from torch.func import jacrev, vmap
 
-from .misc import cuda_profile
 from .nn import FeedForward, GaussianFourierEncoder
+
+
+def cuda_profile(fn):
+    @wraps(fn)
+    def wrapper(*args, profile: bool = False, **kwargs):
+        if profile and torch.cuda.is_available():
+            start_bytes = torch.cuda.memory_allocated()
+            result = fn(*args, **kwargs)
+            end_bytes = torch.cuda.memory_allocated()
+            gib = (end_bytes - start_bytes) / (1024 * 1024 * 1024)
+            print(f"Call to {fn.__name__} used {gib:.3f} GiB of memory")
+            return result
+        return fn(*args, **kwargs)
+
+    return wrapper
 
 
 class VectorField(nn.Module, ABC):

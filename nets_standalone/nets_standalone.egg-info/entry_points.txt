@@ -1,0 +1,2 @@
+[console_scripts]
+nets-train = nets.experiments.train:main

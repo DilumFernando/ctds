@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import cached_property
 
+import numpy as np
 import torch
 import torch.distributions as D
 from torch import Size, Tensor
@@ -68,6 +69,14 @@ class GMMDensity(Density):
 class GMM(GMMDensity, Sampleable):
     def sample(self, num_samples: int) -> Tensor:
         return self.distribution.sample(torch.Size((num_samples,)))
+
+    @classmethod
+    def symmetric_2d(cls, nmodes: int, scale: float = 10.0, std: float = 1.0) -> "GMM":
+        angles = torch.linspace(0, 2 * np.pi, nmodes + 1)[:nmodes]
+        means = torch.stack([torch.cos(angles), torch.sin(angles)], dim=1) * scale
+        covs = torch.diag_embed(torch.ones(nmodes, 2) * std**2)
+        weights = torch.ones(nmodes) / nmodes
+        return cls(means, covs, weights)
 
     @classmethod
     def FAB_GMM(cls, cov_scale: float = 1.0) -> "GMM":

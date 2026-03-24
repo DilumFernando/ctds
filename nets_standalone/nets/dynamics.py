@@ -9,8 +9,15 @@ from torch import Tensor
 from tqdm import tqdm
 
 from .base import Sampleable
-from .misc import record_every_idxs
 from .vector_fields import VectorField
+
+
+def record_every_indices(num_timesteps: int, record_every: int) -> Tensor:
+    if record_every == 1:
+        return torch.arange(num_timesteps)
+    return torch.cat(
+        [torch.arange(0, num_timesteps - 1, record_every), torch.tensor([num_timesteps - 1])]
+    )
 
 
 class AuxiliaryProcess(nn.Module, ABC):
@@ -92,7 +99,7 @@ class ForwardProcess(nn.Module, ABC):
         aux0 = {k: aux.initial_value(num_samples).to(x0) for k, aux in self.auxiliary_processes.items()}
         x_trajectory, aux_trajectory, ts = self.integrate_with_trajectory(x0, aux0, ts, use_tqdm)
         if record_every > 1:
-            record_idxs = record_every_idxs(ts.shape[1], record_every)
+            record_idxs = record_every_indices(ts.shape[1], record_every)
             x_trajectory = x_trajectory[:, record_idxs]
             aux_trajectory = {k: v[:, record_idxs] for k, v in aux_trajectory.items()}
             ts = ts[:, record_idxs]

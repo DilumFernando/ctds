@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import argparse
+import csv
 import json
+import os
 import random
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,9 +11,15 @@ from typing import Dict
 import numpy as np
 import torch
 
-from .config import load_config
-from .misc import resolve_device
 from .model import NETSModel
+
+
+def resolve_device(device: str | None) -> torch.device:
+    if device == "cuda" and torch.cuda.is_available():
+        return torch.device("cuda")
+    if device in (None, "auto"):
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device(device)
 
 
 @dataclass
@@ -30,6 +37,26 @@ def save_checkpoint(path: Path, model: NETSModel, optimizer, scheduler, epoch: i
         "metrics": metrics,
     }
     torch.save(payload, path)
+
+
+def append_jsonl(path: Path, metrics: Dict[str, float]) -> None:
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(metrics) + "\n")
+
+
+def write_csv(path: Path, history: list[Dict[str, float]]) -> None:
+    if not history:
+        return
+    fieldnames: list[str] = []
+    for row in history:
+        for key in row.keys():
+            if key not in fieldnames:
+                fieldnames.append(key)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in history:
+            writer.writerow(row)
 
 
 def train(cfg) -> dict:
@@ -56,6 +83,8 @@ def train(cfg) -> dict:
     run_name = f"{cfg.run_name}_{run_id}"
     checkpoints_dir = Path.cwd() / "checkpoints" / str(cfg.run_group) / run_name
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
+    jsonl_log_path = checkpoints_dir / "metrics.jsonl"
+    csv_log_path = checkpoints_dir / "metrics.csv"
 
     best_checkpoints: list[CheckpointEntry] = []
     history = []
@@ -107,29 +136,15 @@ def train(cfg) -> dict:
                         stale.path.unlink()
 
         history.append(epoch_metrics)
+        append_jsonl(jsonl_log_path, epoch_metrics)
+        write_csv(csv_log_path, history)
         print(json.dumps(epoch_metrics))
 
-    return {"run_name": run_name, "device": str(device), "history": history}
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Train standalone NETS with pure PyTorch.")
-    parser.add_argument("--config", required=True, help="Path to TOML config.")
-    parser.add_argument("--run-name", help="Optional run name override.")
-    parser.add_argument(
-        "--set",
-        action="append",
-        default=[],
-        help="Config override, e.g. --set max_epochs=5",
-    )
-    args = parser.parse_args()
-
-    overrides = list(args.set)
-    if args.run_name:
-        overrides.append(f"run_name={args.run_name}")
-    cfg = load_config(args.config, overrides=overrides)
-    train(cfg)
-
-
-if __name__ == "__main__":
-    main()
+    return {
+        "run_name": run_name,
+        "device": str(device),
+        "history": history,
+        "log_dir": str(checkpoints_dir),
+        "jsonl_log": str(jsonl_log_path),
+        "csv_log": str(csv_log_path),
+    }

@@ -1,0 +1,56 @@
+run_name: nets_toy_cpu
+run_group: nets_toy
+
+x_dim: 2
+density_path: learnable_linear
+learnable_hiddens: [16, 16]
+target: symmetric_gmm_2d
+target_nmodes: 4
+target_scale: 4.0
+target_std: 0.5
+cov_scale: 1.0
+source_std: 2.0
+
+device: cpu
+seed: 0
+max_epochs: 1
+lr: 0.001
+lr_burn_in_epochs: 0
+step_size: 10
+gamma: 0.97
+checkpoint_burn_in_epochs: 0
+save_top_k: 1
+
+use_persistent_sample_buffer: false
+persistent_sample_buffer_trajectories: 8
+train_trajectories: 8
+train_steps_per_epoch: 1
+val_trajectories: 8
+val_freq: 1
+
+annealing_scheduler: manual
+T_schedule: [1.0]
+epochs_per_T: [1]
+avg_dt: 0.25
+record_every: 2
+divergence_mode: autograd
+
+control_hiddens: [16, 16]
+free_energy_hiddens: [16, 16]
+
+use_fourier: false
+x_fourier_dim: 8
+x_fourier_sigma: 0.1
+t_fourier_dim: 8
+t_fourier_sigma: 1.0
+
+damping: 1.0
+use_jarzynski: false
+
+verbose: false
+memory_profile: false
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

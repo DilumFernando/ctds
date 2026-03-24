@@ -1,18 +1,32 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from functools import partial
+from functools import wraps
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 from torch.func import jacrev, vmap
 
-from .base import Density, Sampleable, WrapperDensity
+from .base import Density, Sampleable
 from .config import Config
 from .distributions import GMM, Gaussian
-from .misc import cuda_profile
 from .nn import FeedForward, GaussianFourierEncoder
+
+
+def cuda_profile(fn):
+    @wraps(fn)
+    def wrapper(*args, profile: bool = False, **kwargs):
+        if profile and torch.cuda.is_available():
+            start_bytes = torch.cuda.memory_allocated()
+            result = fn(*args, **kwargs)
+            end_bytes = torch.cuda.memory_allocated()
+            gib = (end_bytes - start_bytes) / (1024 * 1024 * 1024)
+            print(f"Call to {fn.__name__} used {gib:.3f} GiB of memory")
+            return result
+        return fn(*args, **kwargs)
+
+    return wrapper
 
 
 class DensityPath(nn.Module, ABC):
@@ -70,9 +84,6 @@ class LinearDensityPath(DensityPath):
     def end_sampleable(self) -> Sampleable:
         return self._end_sampleable
 
-    def get_density_at(self, t: float) -> Density:
-        return WrapperDensity(partial(self.log_density, t=t), self.dim)
-
     def log_density(self, x: Tensor, t: Tensor) -> Tensor:
         return t * self.end.log_density(x) + (1 - t) * self.start.log_density(x)
 
@@ -116,12 +127,20 @@ class LearnableLinearDensityPath(LinearDensityPath):
 
 
 def build_density_path(cfg: Config) -> DensityPath:
-    if cfg.target != "fab_gmm":
-        raise NotImplementedError("Standalone repo only includes fab_gmm.")
     if cfg.density_path != "learnable_linear":
         raise NotImplementedError("Standalone repo only includes learnable_linear density path.")
 
-    target = GMM.FAB_GMM(cov_scale=cfg.cov_scale)
+    if cfg.target == "fab_gmm":
+        target = GMM.FAB_GMM(cov_scale=cfg.cov_scale)
+    elif cfg.target == "symmetric_gmm_2d":
+        target = GMM.symmetric_2d(
+            nmodes=int(cfg.target_nmodes),
+            scale=float(cfg.target_scale),
+            std=float(cfg.target_std),
+        )
+    else:
+        raise NotImplementedError("Standalone repo only includes fab_gmm and symmetric_gmm_2d targets.")
+
     source = Gaussian.isotropic(dim=cfg.x_dim, std=cfg.source_std)
     return LearnableLinearDensityPath(
         start_sampleable=source,
