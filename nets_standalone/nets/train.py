@@ -114,7 +114,7 @@ def train(cfg) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train standalone NETS with pure PyTorch.")
-    parser.add_argument("--config", required=True, help="Path to YAML config.")
+    parser.add_argument("--config", required=True, help="Path to TOML config.")
     parser.add_argument("--run-name", help="Optional run name override.")
     parser.add_argument(
         "--set",

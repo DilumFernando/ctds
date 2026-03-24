@@ -8,6 +8,8 @@ original PyTorch Lightning training stack with a pure PyTorch loop.
 ## Install
 
 ```bash
+conda env create -f environment.yml
+conda activate nets-standalone
 pip install -e .
 ```
 
