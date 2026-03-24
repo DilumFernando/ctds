@@ -1,20 +1,20 @@
-run_name: nets_toy_cpu
-run_group: nets_toy
+run_name: nets_linear_random_gmm
+run_group: nets_random
 wandb: false
 wandb_project: null
 
 x_dim: 2
-density_path: learnable_linear
-learnable_hiddens: [16, 16]
-target: symmetric_gmm_2d
-target_nmodes: 2
-target_scale: 4.0
-target_std: 0.5
+density_path: linear
+target: random_gmm
+target_nmodes: 5
+target_scale: 6.0
+target_std: 0.6
+target_seed: 7
 cov_scale: 1.0
 source_std: 2.0
 
 device: cpu
-seed: 38
+seed: 7
 max_epochs: 50
 lr: 0.001
 lr_burn_in_epochs: 0

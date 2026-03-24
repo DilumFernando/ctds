@@ -1,0 +1,66 @@
+run_name: nets_asymmetric_two_mode_2d
+run_group: nets_asymmetric
+wandb: false
+wandb_project: null
+
+x_dim: 2
+density_path: learnable_linear
+target: asymmetric_two_mode_gmm
+target_mode_distance: 30.0
+target_small_mode_weight: 0.7
+target_large_mode_weight: 0.3
+target_small_mode_std: 0.5
+target_large_mode_std: 5
+target_randomize_mode_locations: true
+target_seed: 40
+cov_scale: 1.0
+source_std: 1.0
+
+device: cpu
+seed: 40
+max_epochs: 50
+lr: 0.001
+lr_burn_in_epochs: 10
+step_size: 10
+gamma: 0.97
+checkpoint_burn_in_epochs: 10
+save_top_k: 1
+plot_every_n_epochs: 10
+plot_num_trajectories: 24
+plot_min_points: 2000
+
+use_persistent_sample_buffer: true
+persistent_sample_buffer_trajectories: 2000
+train_trajectories: 250
+train_steps_per_epoch: 100
+val_trajectories: 1000
+val_steps_per_epoch: 2
+val_freq: 5
+
+annealing_scheduler: manual
+T_schedule: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+epochs_per_T: [5, 5, 5, 5, 5, 5, 5, 5, 5, 5]
+avg_dt: 0.01
+record_every: 20
+divergence_mode: autograd
+
+control_hiddens: [16, 16]
+free_energy_hiddens: [16, 16]
+learnable_hiddens: [16, 16]
+
+use_fourier: false
+x_fourier_dim: 8
+x_fourier_sigma: 0.1
+t_fourier_dim: 8
+t_fourier_sigma: 1.0
+
+damping: 10.0
+use_jarzynski: true
+
+verbose: false
+memory_profile: false
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

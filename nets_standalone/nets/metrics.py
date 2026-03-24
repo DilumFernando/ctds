@@ -31,3 +31,22 @@ def w2_from_samples(
 def ess(log_w: torch.Tensor, log_clamp_val: float = MAX_LOG_WEIGHT) -> torch.Tensor:
     w = torch.exp(torch.clamp(log_w, max=log_clamp_val))
     return torch.mean(w) ** 2 / torch.mean(w**2)
+
+
+def mode_weights_from_samples(
+    samples: torch.Tensor,
+    modes: torch.Tensor,
+    sample_weights: torch.Tensor | None = None,
+) -> torch.Tensor:
+    if samples.ndim != 2 or modes.ndim != 2:
+        raise ValueError("samples and modes must both have shape [n, dim].")
+    distances = torch.cdist(samples, modes)
+    assignments = torch.argmin(distances, dim=1)
+    if sample_weights is None:
+        sample_weights = torch.ones(samples.shape[0], device=samples.device, dtype=samples.dtype)
+    else:
+        sample_weights = sample_weights.reshape(-1).to(samples)
+    sample_weights = sample_weights / torch.sum(sample_weights)
+    mode_weights = torch.zeros(modes.shape[0], device=samples.device, dtype=samples.dtype)
+    mode_weights.scatter_add_(0, assignments, sample_weights)
+    return mode_weights

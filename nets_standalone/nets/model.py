@@ -280,6 +280,35 @@ class NETSModel(nn.Module):
             "weights": weights.detach(),
         }
 
+    @torch.no_grad()
+    def sample_plot_buffer(self, num_trajectories: int, min_points: int = 0) -> Dict[str, Tensor]:
+        sample_buffer = self.replenish_sample_buffer(
+            num_trajectories=num_trajectories,
+            proposal_type="overdamped_langevin",
+            T=self.T,
+        )
+        points_per_trajectory = sample_buffer["xs"].shape[1]
+        total_points = sample_buffer["xs"].shape[0] * points_per_trajectory
+        if min_points > 0 and total_points < min_points:
+            required_trajectories = math.ceil(min_points / points_per_trajectory)
+            sample_buffer = self.replenish_sample_buffer(
+                num_trajectories=required_trajectories,
+                proposal_type="overdamped_langevin",
+                T=self.T,
+            )
+
+        num_target_samples = sample_buffer["xs"].shape[0]
+        if min_points > 0:
+            num_target_samples = min_points
+        target_samples = self.density_path.end_sampleable.sample(num_target_samples).to(module_device(self))
+        target_log_density = self.density_path.end_sampleable.log_density(target_samples)
+        sample_buffer["target_samples"] = target_samples.detach()
+        sample_buffer["target_density"] = torch.exp(target_log_density).detach()
+        target_modes = getattr(self.density_path.end_sampleable, "means", None)
+        if target_modes is not None:
+            sample_buffer["target_modes"] = target_modes.detach()
+        return sample_buffer
+
     def pinn_loss(self, x: Tensor, t: Tensor, weights: Tensor) -> Tensor:
         dt_Ft = self.dt_free_energy(t, profile=bool(self.cfg.memory_profile))
         control = self.control(x, t)

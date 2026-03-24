@@ -8,6 +8,8 @@ dependencies:
   - numpy
   - tqdm
   - hydra-core
+  - matplotlib
   - pip
   - pip:
       - pot
+      - wandb

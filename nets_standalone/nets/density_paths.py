@@ -127,9 +127,6 @@ class LearnableLinearDensityPath(LinearDensityPath):
 
 
 def build_density_path(cfg: Config) -> DensityPath:
-    if cfg.density_path != "learnable_linear":
-        raise NotImplementedError("Standalone repo only includes learnable_linear density path.")
-
     if cfg.target == "fab_gmm":
         target = GMM.FAB_GMM(cov_scale=cfg.cov_scale)
     elif cfg.target == "symmetric_gmm_2d":
@@ -138,19 +135,49 @@ def build_density_path(cfg: Config) -> DensityPath:
             scale=float(cfg.target_scale),
             std=float(cfg.target_std),
         )
+    elif cfg.target == "random_gmm":
+        target = GMM.random_gmm(
+            nmodes=int(cfg.target_nmodes),
+            scale=float(cfg.target_scale),
+            dim=int(cfg.x_dim),
+            std=float(cfg.target_std),
+            seed=int(cfg.target_seed),
+        )
+    elif cfg.target == "asymmetric_two_mode_gmm":
+        target = GMM.asymmetric_two_mode(
+            dim=int(cfg.x_dim),
+            mode_distance=float(cfg.target_mode_distance),
+            small_mode_weight=float(cfg.target_small_mode_weight),
+            large_mode_weight=float(cfg.target_large_mode_weight),
+            small_mode_std=float(cfg.target_small_mode_std),
+            large_mode_std=float(cfg.target_large_mode_std),
+            randomize_mode_locations=bool(cfg.get("target_randomize_mode_locations", False)),
+            seed=int(cfg.get("target_seed", cfg.seed)),
+        )
     else:
-        raise NotImplementedError("Standalone repo only includes fab_gmm and symmetric_gmm_2d targets.")
+        raise NotImplementedError(
+            "Standalone repo only includes fab_gmm, symmetric_gmm_2d, random_gmm, and asymmetric_two_mode_gmm targets."
+        )
 
     source = Gaussian.isotropic(dim=cfg.x_dim, std=cfg.source_std)
-    return LearnableLinearDensityPath(
-        start_sampleable=source,
-        start=source,
-        end=target,
-        learnable_hiddens=list(cfg.learnable_hiddens),
-        use_fourier=bool(cfg.use_fourier),
-        x_fourier_dim=int(cfg.x_fourier_dim),
-        x_fourier_sigma=float(cfg.x_fourier_sigma),
-        t_fourier_dim=int(cfg.t_fourier_dim),
-        t_fourier_sigma=float(cfg.t_fourier_sigma),
-        end_sampleable=target,
-    )
+    if cfg.density_path == "linear":
+        return LinearDensityPath(
+            start_sampleable=source,
+            start=source,
+            end=target,
+            end_sampleable=target,
+        )
+    if cfg.density_path == "learnable_linear":
+        return LearnableLinearDensityPath(
+            start_sampleable=source,
+            start=source,
+            end=target,
+            learnable_hiddens=list(cfg.learnable_hiddens),
+            use_fourier=bool(cfg.use_fourier),
+            x_fourier_dim=int(cfg.x_fourier_dim),
+            x_fourier_sigma=float(cfg.x_fourier_sigma),
+            t_fourier_dim=int(cfg.t_fourier_dim),
+            t_fourier_sigma=float(cfg.t_fourier_sigma),
+            end_sampleable=target,
+        )
+    raise NotImplementedError("Standalone repo only includes linear and learnable_linear density paths.")
