@@ -5,10 +5,10 @@ wandb_project: null
 
 x_dim: 2
 density_path: learnable_linear
-learnable_hiddens: [16, 16]
+learnable_hiddens: [512, 512, 512, 512, 512, 512]
 target: constrained_random_gmm
 target_mode_weights: [0.5, 0.3, 0.2]
-target_mode_stds: [0.6, 1.2, 2.0]
+target_mode_covariances: [0.36, 1.44, 4.0]
 target_min_mode_distance: 8.0
 target_seed: 40
 cov_scale: 1.0
@@ -27,6 +27,16 @@ component_bal_lambda: 0.0
 plot_every_n_epochs: 10
 plot_num_trajectories: 24
 plot_min_points: 2000
+num_seeds: 1
+multiseed_seeds: null
+multiseed_vary_target_seed: false
+eval_plot_every_seed: 1
+eval_plot_num_trajectories: 128
+eval_plot_min_points: 4000
+cross_section_dim_pairs: null
+cross_section_max_pairs: 6
+marginal_dims: null
+marginal_max_dims: 8
 
 use_persistent_sample_buffer: true
 persistent_sample_buffer_trajectories: 2000
@@ -43,8 +53,8 @@ avg_dt: 0.01
 record_every: 20
 divergence_mode: autograd
 
-control_hiddens: [16, 16]
-free_energy_hiddens: [16, 16]
+control_hiddens: [512, 512, 512, 512, 512, 512]
+free_energy_hiddens: [512, 512, 512, 512, 512, 512]
 
 use_fourier: false
 x_fourier_dim: 8

@@ -15,7 +15,7 @@ from .config import Config
 from .density_paths import DensityPath, build_density_path
 from .dynamics import AuxiliaryProcess, DivegenceAuxiliaryProcess, ODEProcess
 from .langevin import AnnealedOverdampedLangevin
-from .metrics import MAX_LOG_WEIGHT, ess, normalize_log_weights, w2_from_samples
+from .metrics import MAX_LOG_WEIGHT, MIN_LOG_WEIGHT, ess, normalize_log_weights, sanitize_log_weights, w2_from_samples
 from .nn import FeedForward, GaussianFourierEncoder
 from .vector_fields import MLPVectorField, VectorField
 
@@ -78,7 +78,10 @@ class OverdampedJarzynski(AuxiliaryProcess):
         dx_log_pt = self.density_path.dx_log_density(xt, t)
         dot = (dx_log_pt * self.control(xt, t)).sum(dim=-1, keepdim=True)
         dt_log_pt = self.density_path.dt_log_density(xt, t)
-        return at + (div + dot + dt_log_pt) * dt
+        integrand = div + dot + dt_log_pt
+        integrand = torch.nan_to_num(integrand, nan=0.0, posinf=1000.0, neginf=-1000.0)
+        at = torch.nan_to_num(at, nan=0.0, posinf=1000.0, neginf=-1000.0)
+        return torch.nan_to_num(at + integrand * dt, nan=0.0, posinf=1000.0, neginf=-1000.0)
 
 
 class PINNProposal(nn.Module, ABC):
@@ -305,9 +308,13 @@ class NETSModel(nn.Module):
         raise NotImplementedError("Standalone repo only includes overdamped_langevin and ode proposals.")
 
     def extract_weights(self, log_weights: Tensor) -> Tensor:
-        log_weights = torch.clamp(log_weights, max=MAX_LOG_WEIGHT)
-        weights = torch.exp(log_weights)
-        return weights / torch.mean(weights, dim=0, keepdim=True)
+        log_weights = sanitize_log_weights(log_weights, log_clamp_val=MAX_LOG_WEIGHT)
+        shifted = log_weights - torch.logsumexp(log_weights, dim=0, keepdim=True)
+        log_normalized = shifted + math.log(max(log_weights.shape[0], 1))
+        weights = torch.exp(torch.clamp(log_normalized, min=MIN_LOG_WEIGHT, max=MAX_LOG_WEIGHT))
+        weights = torch.nan_to_num(weights, nan=1.0, posinf=math.exp(MAX_LOG_WEIGHT), neginf=0.0)
+        mean_weight = torch.mean(weights, dim=0, keepdim=True).clamp_min(torch.finfo(weights.dtype).tiny)
+        return weights / mean_weight
 
     def replenish_sample_buffer(
         self,
@@ -381,6 +388,8 @@ class NETSModel(nn.Module):
         if target_modes is None:
             return torch.zeros((), device=xs.device, dtype=xs.dtype)
 
+        xs = torch.nan_to_num(xs, nan=0.0, posinf=1000.0, neginf=-1000.0)
+        weights = torch.nan_to_num(weights, nan=0.0, posinf=0.0, neginf=0.0).clamp_min(0.0)
         nmodes = target_modes.shape[0]
         uniform = torch.ones(nmodes, device=xs.device, dtype=xs.dtype) / nmodes
         eps = torch.finfo(xs.dtype).eps
@@ -390,8 +399,13 @@ class NETSModel(nn.Module):
         for time_idx in range(xs.shape[1]):
             xt = xs[:, time_idx, :]
             wt = weights[:, time_idx, 0]
-            wt = wt / torch.sum(wt)
+            wt_sum = torch.sum(wt)
+            if wt_sum <= eps:
+                wt = torch.ones_like(wt) / wt.numel()
+            else:
+                wt = wt / wt_sum
             distances_sq = torch.cdist(xt, target_modes.to(xt)).square()
+            distances_sq = torch.nan_to_num(distances_sq, nan=1.0e6, posinf=1.0e6, neginf=1.0e6)
             soft_assignments = torch.softmax(-distances_sq / assignment_temperature, dim=1)
             mode_mass = torch.sum(wt.unsqueeze(1) * soft_assignments, dim=0)
             mode_mass = torch.clamp(mode_mass, min=eps)

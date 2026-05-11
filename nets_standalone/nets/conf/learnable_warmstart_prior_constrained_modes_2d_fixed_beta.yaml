@@ -8,7 +8,7 @@ density_path: learnable_warmstart_potential_sum_fixed_beta
 learnable_hiddens: [16, 16]
 target: constrained_random_gmm
 target_mode_weights: [0.5, 0.3, 0.2]
-target_mode_stds: [0.6, 1.2, 2.0]
+target_mode_covariances: [0.36, 1.44, 4.0]
 target_min_mode_distance: 8.0
 target_seed: 41
 

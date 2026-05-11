@@ -8,7 +8,7 @@ density_path: linear
 target: random_gmm
 target_nmodes: 5
 target_scale: 6.0
-target_std: 0.6
+target_covariance: 0.36
 target_seed: 7
 cov_scale: 1.0
 source_std: 2.0

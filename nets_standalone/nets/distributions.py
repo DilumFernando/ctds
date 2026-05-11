@@ -77,15 +77,15 @@ class GMM(GMMDensity, Sampleable):
         cls,
         dim: int,
         mode_weights: list[float],
-        mode_stds: list[float],
+        mode_covariances: list[float],
         min_mode_distance: float,
         seed: int,
         max_tries: int = 10_000,
     ) -> "GMM":
         if dim < 1:
             raise ValueError("dim must be at least 1")
-        if len(mode_weights) != len(mode_stds):
-            raise ValueError("mode_weights and mode_stds must have the same length")
+        if len(mode_weights) != len(mode_covariances):
+            raise ValueError("mode_weights and mode_covariances must have the same length")
         if len(mode_weights) == 0:
             raise ValueError("At least one mode is required")
 
@@ -93,7 +93,9 @@ class GMM(GMMDensity, Sampleable):
         nmodes = len(mode_weights)
         weights = torch.tensor(mode_weights, dtype=torch.float32)
         weights = weights / weights.sum()
-        stds = torch.tensor(mode_stds, dtype=torch.float32)
+        covariances = torch.tensor(mode_covariances, dtype=torch.float32)
+        if torch.any(covariances <= 0):
+            raise ValueError("mode_covariances must all be positive")
 
         bounded_min_distance = min(float(min_mode_distance), 2.0 * PLOT_LIMIT)
         means = []
@@ -118,7 +120,7 @@ class GMM(GMMDensity, Sampleable):
                 )
 
         means = torch.stack(means, dim=0)
-        covs = torch.diag_embed(stds.square().unsqueeze(-1).expand(-1, dim))
+        covs = torch.diag_embed(covariances.unsqueeze(-1).expand(-1, dim))
         return cls(means, covs, weights)
 
     @classmethod
@@ -128,13 +130,15 @@ class GMM(GMMDensity, Sampleable):
         mode_distance: float,
         small_mode_weight: float,
         large_mode_weight: float,
-        small_mode_std: float,
-        large_mode_std: float,
+        small_mode_covariance: float,
+        large_mode_covariance: float,
         randomize_mode_locations: bool = False,
         seed: int = 0,
     ) -> "GMM":
         if dim < 1:
             raise ValueError("dim must be at least 1")
+        if small_mode_covariance <= 0 or large_mode_covariance <= 0:
+            raise ValueError("mode covariances must be positive")
 
         bounded_mode_distance = min(float(mode_distance), 2.0 * PLOT_LIMIT)
         means = torch.zeros(2, dim)
@@ -154,8 +158,8 @@ class GMM(GMMDensity, Sampleable):
         covs = torch.diag_embed(
             torch.tensor(
                 [
-                    [large_mode_std**2] * dim,
-                    [small_mode_std**2] * dim,
+                    [large_mode_covariance] * dim,
+                    [small_mode_covariance] * dim,
                 ],
                 dtype=means.dtype,
             )
@@ -170,22 +174,26 @@ class GMM(GMMDensity, Sampleable):
         nmodes: int,
         scale: float,
         dim: int,
-        std: float,
+        covariance: float,
         seed: int,
     ) -> "GMM":
+        if covariance <= 0:
+            raise ValueError("covariance must be positive")
         generator = torch.Generator().manual_seed(seed)
         half_width = min(float(scale) / 2.0, PLOT_LIMIT)
         means = (torch.rand(nmodes, dim, generator=generator) - 0.5) * (2.0 * half_width)
-        covs = torch.diag_embed(torch.ones(nmodes, dim) * std**2)
+        covs = torch.diag_embed(torch.ones(nmodes, dim) * covariance)
         raw_weights = torch.rand(nmodes, generator=generator)
         weights = raw_weights / raw_weights.sum()
         return cls(means, covs, weights)
 
     @classmethod
-    def symmetric_2d(cls, nmodes: int, scale: float = 10.0, std: float = 1.0) -> "GMM":
+    def symmetric_2d(cls, nmodes: int, scale: float = 10.0, covariance: float = 1.0) -> "GMM":
+        if covariance <= 0:
+            raise ValueError("covariance must be positive")
         angles = torch.linspace(0, 2 * np.pi, nmodes + 1)[:nmodes]
         means = torch.stack([torch.cos(angles), torch.sin(angles)], dim=1) * scale
-        covs = torch.diag_embed(torch.ones(nmodes, 2) * std**2)
+        covs = torch.diag_embed(torch.ones(nmodes, 2) * covariance)
         weights = torch.ones(nmodes) / nmodes
         return cls(means, covs, weights)
 

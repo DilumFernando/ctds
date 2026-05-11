@@ -9,8 +9,8 @@ target: asymmetric_two_mode_gmm
 target_mode_distance: 20.0
 target_small_mode_weight: 0.5
 target_large_mode_weight: 0.5
-target_small_mode_std: 1
-target_large_mode_std: 1
+target_small_mode_covariance: 1
+target_large_mode_covariance: 1
 cov_scale: 1.0
 source_std: 2.0
 

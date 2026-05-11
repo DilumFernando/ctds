@@ -7,7 +7,7 @@ x_dim: 1
 density_path: warmstart_potential_sum
 target: constrained_random_gmm
 target_mode_weights: [0.5, 0.5]
-target_mode_stds: [3, 3]
+target_mode_covariances: [9, 9]
 target_min_mode_distance: 20.0
 target_seed: 41
 

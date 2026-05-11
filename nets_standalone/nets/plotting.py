@@ -1,27 +1,54 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from typing import Any
 
 import torch
 
 PLOT_LIMIT = 20.0
 METRIC_PLOT_IGNORE_KEYS = {"val_w2", "T", "memory_gib"}
 
-try:
-    import matplotlib
+matplotlib: Any | None = None
+plt: Any | None = None
+Normalize: Any | None = None
+_PLOTTING_IMPORT_ATTEMPTED = False
 
-    matplotlib.use("Agg")
 
-    import matplotlib.pyplot as plt
-    from matplotlib.colors import Normalize
-except ImportError:
-    matplotlib = None
-    plt = None
-    Normalize = None
+def _configure_plot_cache_dirs() -> None:
+    cache_root = Path.cwd() / ".cache"
+    os.environ.setdefault("MPLCONFIGDIR", str(cache_root / "matplotlib"))
+    os.environ.setdefault("XDG_CACHE_HOME", str(cache_root))
+    Path(os.environ["MPLCONFIGDIR"]).mkdir(parents=True, exist_ok=True)
+    Path(os.environ["XDG_CACHE_HOME"]).mkdir(parents=True, exist_ok=True)
+
+
+def _load_matplotlib() -> bool:
+    global Normalize, _PLOTTING_IMPORT_ATTEMPTED, matplotlib, plt
+
+    if _PLOTTING_IMPORT_ATTEMPTED:
+        return matplotlib is not None and plt is not None and Normalize is not None
+
+    _PLOTTING_IMPORT_ATTEMPTED = True
+    _configure_plot_cache_dirs()
+    try:
+        import matplotlib as imported_matplotlib
+
+        imported_matplotlib.use("Agg")
+
+        import matplotlib.pyplot as imported_pyplot
+        from matplotlib.colors import Normalize as ImportedNormalize
+    except ImportError:
+        return False
+
+    matplotlib = imported_matplotlib
+    plt = imported_pyplot
+    Normalize = ImportedNormalize
+    return True
 
 
 def plotting_available() -> bool:
-    return matplotlib is not None and plt is not None and Normalize is not None
+    return _load_matplotlib()
 
 
 def save_weighted_trajectory_plot(
@@ -261,6 +288,177 @@ def save_weights_histogram(
     fig.tight_layout()
     fig.savefig(path, dpi=180)
     plt.close(fig)
+
+
+def _default_dim_pairs(x_dim: int, max_pairs: int) -> list[tuple[int, int]]:
+    pairs = []
+    for first_dim in range(x_dim):
+        for second_dim in range(first_dim + 1, x_dim):
+            pairs.append((first_dim, second_dim))
+            if len(pairs) >= max_pairs:
+                return pairs
+    return pairs
+
+
+def save_high_dim_cross_section_plots(
+    xs: torch.Tensor,
+    weights: torch.Tensor,
+    target_samples: torch.Tensor,
+    target_modes: torch.Tensor | None,
+    output_dir: str | Path,
+    title: str,
+    dim_pairs: list[tuple[int, int]] | None = None,
+    max_pairs: int = 6,
+) -> list[Path]:
+    if not plotting_available():
+        raise ImportError("matplotlib is not installed. Install it or disable plotting.")
+
+    x_dim = xs.shape[-1]
+    if x_dim < 2:
+        raise ValueError("High-dimensional cross-section plotting requires x_dim >= 2.")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if dim_pairs is None:
+        dim_pairs = _default_dim_pairs(x_dim, max_pairs=max_pairs)
+    dim_pairs = dim_pairs[:max_pairs]
+    if not dim_pairs:
+        return []
+
+    final_xs_cpu = xs.detach().cpu()[:, -1]
+    final_weights_cpu = weights.detach().cpu()[:, -1].reshape(-1)
+    target_samples_cpu = target_samples.detach().cpu()
+    target_modes_cpu = None if target_modes is None else target_modes.detach().cpu()
+    weights_norm = Normalize(vmin=float(final_weights_cpu.min()), vmax=float(final_weights_cpu.max()))
+
+    saved_paths = []
+    for first_dim, second_dim in dim_pairs:
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5.5))
+        particle_ax, target_ax = axes
+
+        scatter = particle_ax.scatter(
+            final_xs_cpu[:, first_dim],
+            final_xs_cpu[:, second_dim],
+            c=final_weights_cpu.numpy(),
+            cmap="magma",
+            norm=weights_norm,
+            s=18,
+            alpha=0.9,
+        )
+        target_ax.scatter(
+            target_samples_cpu[:, first_dim],
+            target_samples_cpu[:, second_dim],
+            color="#f28e2b",
+            s=18,
+            alpha=0.45,
+            edgecolors="none",
+        )
+
+        if target_modes_cpu is not None:
+            for ax in axes:
+                ax.scatter(
+                    target_modes_cpu[:, first_dim],
+                    target_modes_cpu[:, second_dim],
+                    marker="x",
+                    s=160,
+                    linewidths=3.5,
+                    color="red",
+                    alpha=0.95,
+                    zorder=5,
+                )
+
+        for ax in axes:
+            ax.set_xlabel(f"x{first_dim}")
+            ax.set_ylabel(f"x{second_dim}")
+            ax.set_xlim((-PLOT_LIMIT, PLOT_LIMIT))
+            ax.set_ylim((-PLOT_LIMIT, PLOT_LIMIT))
+            ax.set_aspect("equal", adjustable="box")
+            ax.grid(alpha=0.35, linestyle="--", linewidth=0.8, color="#666666")
+
+        particle_ax.set_title("Particles colored by weights")
+        target_ax.set_title("Target samples")
+        cbar = fig.colorbar(scatter, ax=particle_ax)
+        cbar.set_label("particle weight")
+        fig.suptitle(f"{title} x{first_dim}/x{second_dim}")
+        fig.tight_layout(rect=(0, 0, 1, 0.95))
+
+        path = output_dir / f"cross_section_x{first_dim}_x{second_dim}.png"
+        fig.savefig(path, dpi=180)
+        plt.close(fig)
+        saved_paths.append(path)
+
+    return saved_paths
+
+
+def save_high_dim_marginal_histograms(
+    xs: torch.Tensor,
+    weights: torch.Tensor,
+    target_samples: torch.Tensor,
+    output_dir: str | Path,
+    title: str,
+    dims: list[int] | None = None,
+    max_dims: int = 8,
+    bins: int = 60,
+) -> Path:
+    if not plotting_available():
+        raise ImportError("matplotlib is not installed. Install it or disable plotting.")
+
+    x_dim = xs.shape[-1]
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if dims is None:
+        dims = list(range(min(x_dim, max_dims)))
+    dims = dims[:max_dims]
+
+    final_xs_cpu = xs.detach().cpu()[:, -1]
+    final_weights_cpu = weights.detach().cpu()[:, -1].reshape(-1).numpy()
+    target_samples_cpu = target_samples.detach().cpu()
+
+    ncols = min(4, len(dims))
+    nrows = (len(dims) + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4.2 * ncols, 3.2 * nrows), squeeze=False)
+
+    for ax in axes.reshape(-1):
+        ax.set_visible(False)
+    for ax, dim in zip(axes.reshape(-1), dims):
+        ax.set_visible(True)
+        target_values = target_samples_cpu[:, dim].numpy()
+        particle_values = final_xs_cpu[:, dim].numpy()
+        ax.hist(
+            target_values,
+            bins=bins,
+            range=(-PLOT_LIMIT, PLOT_LIMIT),
+            density=True,
+            color="#f28e2b",
+            alpha=0.35,
+            edgecolor="white",
+            linewidth=0.3,
+            label="target",
+        )
+        ax.hist(
+            particle_values,
+            bins=bins,
+            range=(-PLOT_LIMIT, PLOT_LIMIT),
+            weights=final_weights_cpu,
+            density=True,
+            color="#2ca02c",
+            alpha=0.75,
+            edgecolor="white",
+            linewidth=0.3,
+            label="weighted particles",
+        )
+        ax.set_title(f"x{dim}")
+        ax.set_xlim((-PLOT_LIMIT, PLOT_LIMIT))
+        ax.grid(alpha=0.25)
+
+    axes.reshape(-1)[0].legend(loc="best")
+    fig.suptitle(title)
+    fig.tight_layout(rect=(0, 0, 1, 0.95))
+    path = output_dir / "marginal_histograms.png"
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+    return path
 
 
 def save_metric_history_plots(history: list[dict], output_dir: str | Path) -> None:

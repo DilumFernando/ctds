@@ -5,7 +5,7 @@ wandb_project: null
 
 x_dim: 2
 density_path: learnable_linear
-learnable_hiddens: [256, 256, 256]
+learnable_hiddens: [512, 512, 512, 512, 512, 512]
 target: fab_gmm
 cov_scale: 0.25
 source_std: 5.0
@@ -36,8 +36,8 @@ avg_dt: 0.002
 record_every: 20
 divergence_mode: autograd
 
-control_hiddens: [256, 256, 256]
-free_energy_hiddens: [256, 256, 256]
+control_hiddens: [512, 512, 512, 512, 512, 512]
+free_energy_hiddens: [512, 512, 512, 512, 512, 512]
 
 use_fourier: true
 x_fourier_dim: 100

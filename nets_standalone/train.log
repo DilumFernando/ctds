@@ -18,3 +18,8 @@
 [2026-03-24 15:43:14,900][matplotlib.axes._base][WARNING] - Ignoring fixed y limits to fulfill fixed data aspect with adjustable data limits.
 [2026-03-24 15:43:15,553][matplotlib.axes._base][WARNING] - Ignoring fixed y limits to fulfill fixed data aspect with adjustable data limits.
 [2026-03-24 15:43:15,576][matplotlib.axes._base][WARNING] - Ignoring fixed y limits to fulfill fixed data aspect with adjustable data limits.
+[2026-05-11 07:47:12,530][matplotlib.font_manager][WARNING] - Matplotlib is building the font cache; this may take a moment.
+[2026-05-11 07:47:13,901][matplotlib.font_manager][INFO] - Failed to extract font properties from /System/Library/Fonts/LastResort.otf: tuple indices must be integers or slices, not str
+[2026-05-11 07:47:13,925][matplotlib.font_manager][INFO] - Failed to extract font properties from /System/Library/Fonts/Apple Color Emoji.ttc: Could not set the fontsize (invalid pixel size; error code 0x17)
+[2026-05-11 07:47:13,936][matplotlib.font_manager][INFO] - Failed to extract font properties from /System/Library/Fonts/Supplemental/NISC18030.ttf: Could not set the fontsize (invalid pixel size; error code 0x17)
+[2026-05-11 07:47:14,049][matplotlib.font_manager][INFO] - generated new fontManager

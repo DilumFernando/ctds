@@ -195,35 +195,50 @@ def build_density_path(cfg: Config) -> DensityPath:
     if cfg.target == "fab_gmm":
         target = GMM.FAB_GMM(cov_scale=cfg.cov_scale)
     elif cfg.target == "symmetric_gmm_2d":
+        target_covariance = cfg.get("target_covariance")
+        if target_covariance is None:
+            target_covariance = float(cfg.target_std) ** 2
         target = GMM.symmetric_2d(
             nmodes=int(cfg.target_nmodes),
             scale=float(cfg.target_scale),
-            std=float(cfg.target_std),
+            covariance=float(target_covariance),
         )
     elif cfg.target == "random_gmm":
+        target_covariance = cfg.get("target_covariance")
+        if target_covariance is None:
+            target_covariance = float(cfg.target_std) ** 2
         target = GMM.random_gmm(
             nmodes=int(cfg.target_nmodes),
             scale=float(cfg.target_scale),
             dim=int(cfg.x_dim),
-            std=float(cfg.target_std),
+            covariance=float(target_covariance),
             seed=int(cfg.target_seed),
         )
     elif cfg.target == "asymmetric_two_mode_gmm":
+        small_mode_covariance = cfg.get("target_small_mode_covariance")
+        if small_mode_covariance is None:
+            small_mode_covariance = float(cfg.target_small_mode_std) ** 2
+        large_mode_covariance = cfg.get("target_large_mode_covariance")
+        if large_mode_covariance is None:
+            large_mode_covariance = float(cfg.target_large_mode_std) ** 2
         target = GMM.asymmetric_two_mode(
             dim=int(cfg.x_dim),
             mode_distance=float(cfg.target_mode_distance),
             small_mode_weight=float(cfg.target_small_mode_weight),
             large_mode_weight=float(cfg.target_large_mode_weight),
-            small_mode_std=float(cfg.target_small_mode_std),
-            large_mode_std=float(cfg.target_large_mode_std),
+            small_mode_covariance=float(small_mode_covariance),
+            large_mode_covariance=float(large_mode_covariance),
             randomize_mode_locations=bool(cfg.get("target_randomize_mode_locations", False)),
             seed=int(cfg.get("target_seed", cfg.seed)),
         )
     elif cfg.target == "constrained_random_gmm":
+        target_mode_covariances = cfg.get("target_mode_covariances")
+        if target_mode_covariances is None:
+            target_mode_covariances = [float(x) ** 2 for x in cfg.target_mode_stds]
         target = GMM.constrained_random_gmm(
             dim=int(cfg.x_dim),
             mode_weights=[float(x) for x in cfg.target_mode_weights],
-            mode_stds=[float(x) for x in cfg.target_mode_stds],
+            mode_covariances=[float(x) for x in target_mode_covariances],
             min_mode_distance=float(cfg.target_min_mode_distance),
             seed=int(cfg.get("target_seed", cfg.seed)),
         )

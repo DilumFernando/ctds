@@ -41,7 +41,10 @@ class DivegenceAuxiliaryProcess(AuxiliaryProcess):
         return torch.zeros(num_samples, 1)
 
     def integrate_step(self, at: Tensor, xt: Tensor, t: Tensor, dt: Tensor) -> Tensor:
-        return at - self.control.divergence(xt, t, mode=self.divergence_mode) * dt
+        div = self.control.divergence(xt, t, mode=self.divergence_mode)
+        div = torch.nan_to_num(div, nan=0.0, posinf=1000.0, neginf=-1000.0)
+        at = torch.nan_to_num(at, nan=0.0, posinf=1000.0, neginf=-1000.0)
+        return torch.nan_to_num(at - div * dt, nan=0.0, posinf=1000.0, neginf=-1000.0)
 
 
 class ForwardProcess(nn.Module, ABC):
@@ -137,9 +140,13 @@ class ForwardDiffusionProcess(ForwardProcess):
         raise NotImplementedError
 
     def state_integrate_step(self, xt: Tensor, t: Tensor, dt: Tensor, clamp_val: float = 1000) -> Tensor:
-        drift = torch.clamp(self.drift(xt, t), -clamp_val, clamp_val)
+        xt = torch.nan_to_num(xt, nan=0.0, posinf=clamp_val, neginf=-clamp_val).clamp(-clamp_val, clamp_val)
+        drift = torch.nan_to_num(self.drift(xt, t), nan=0.0, posinf=clamp_val, neginf=-clamp_val)
+        drift = torch.clamp(drift, -clamp_val, clamp_val)
         noise = torch.randn_like(xt)
-        return xt + drift * dt + self.noise(xt, t) * noise * torch.sqrt(torch.abs(dt))
+        diffusion = torch.nan_to_num(self.noise(xt, t), nan=0.0, posinf=clamp_val, neginf=-clamp_val)
+        updated = xt + drift * dt + diffusion * noise * torch.sqrt(torch.abs(dt))
+        return torch.nan_to_num(updated, nan=0.0, posinf=clamp_val, neginf=-clamp_val).clamp(-clamp_val, clamp_val)
 
 
 class ODEProcess(ForwardDiffusionProcess):

@@ -47,10 +47,35 @@ python -m nets.experiments.train --config-name asymmetric_two_mode_2d
 ```
 
 To run a configurable multi-mode 2D example with explicit mode weights, mode
-standard deviations, and a minimum distance between any two modes:
+covariances, and a minimum distance between any two modes:
 
 ```bash
 python -m nets.experiments.train --config-name constrained_random_modes_2d
+```
+
+To run multiple seeds, evaluate each best checkpoint, log aggregate metrics, and
+save high-dimensional sample cross-section plots:
+
+```bash
+python -m nets.experiments.train_multiseed --config-name constrained_random_modes_2d \
+  x_dim=16 \
+  'target_mode_weights=[0.5,0.5]' \
+  'target_mode_covariances=[1.0,6.0]' \
+  'multiseed_seeds=[0,1,2,3,4]' \
+  plot_every_n_epochs=0 \
+  eval_plot_num_trajectories=128 \
+  eval_plot_min_points=4000 \
+  cross_section_max_pairs=6 \
+  marginal_max_dims=8
+```
+
+The multiseed runner writes per-seed and aggregate files to:
+
+```bash
+checkpoints/<run_group>/<run_name>_multiseed/multiseed_metrics.jsonl
+checkpoints/<run_group>/<run_name>_multiseed/multiseed_metrics.csv
+checkpoints/<run_group>/<run_name>_multiseed/multiseed_summary.csv
+checkpoints/<run_group>/<run_name>_multiseed/seed_<seed>/eval_plots/
 ```
 
 To run a warm-start Gaussian-mixture prior with exponentially decaying shared

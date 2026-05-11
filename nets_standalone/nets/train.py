@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import csv
 import json
-import os
 import random
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict
+
+from . import configure_runtime_env
+
+configure_runtime_env()
 
 import numpy as np
 import torch
@@ -113,6 +116,8 @@ def train(cfg) -> dict:
     wandb_run = None
     plotting_warning_logged = False
     cached_target_plot: dict[str, torch.Tensor] | None = None
+    plot_every_n_epochs = int(cfg.get("plot_every_n_epochs", 10))
+    plotting_enabled = plot_every_n_epochs > 0
 
     append_text(text_log_path, f"run_name={run_name}")
     append_text(text_log_path, f"device={device}")
@@ -149,12 +154,23 @@ def train(cfg) -> dict:
             train_pinn_losses = []
             train_component_bal_losses = []
             memory_usages = []
+            skipped_nonfinite_steps = 0
             for _ in range(int(cfg.train_steps_per_epoch)):
                 optimizer.zero_grad(set_to_none=True)
                 start_bytes = torch.cuda.memory_allocated() if device.type == "cuda" else 0
                 loss_terms = model.compute_train_loss_terms(sample_buffer)
                 loss = loss_terms["loss"]
+                if not torch.isfinite(loss):
+                    skipped_nonfinite_steps += 1
+                    continue
                 loss.backward()
+                grad_clip_norm = float(cfg.get("grad_clip_norm", 100.0))
+                if grad_clip_norm > 0:
+                    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
+                    if not torch.isfinite(grad_norm):
+                        optimizer.zero_grad(set_to_none=True)
+                        skipped_nonfinite_steps += 1
+                        continue
                 optimizer.step()
                 end_bytes = torch.cuda.memory_allocated() if device.type == "cuda" else 0
                 train_losses.append(float(loss.item()))
@@ -167,11 +183,14 @@ def train(cfg) -> dict:
 
             epoch_metrics = {
                 "epoch": epoch,
-                "train_loss": float(np.mean(train_losses)),
-                "train_pinn_loss": float(np.mean(train_pinn_losses)),
-                "train_component_bal_loss": float(np.mean(train_component_bal_losses)),
+                "train_loss": float(np.mean(train_losses)) if train_losses else float("nan"),
+                "train_pinn_loss": float(np.mean(train_pinn_losses)) if train_pinn_losses else float("nan"),
+                "train_component_bal_loss": (
+                    float(np.mean(train_component_bal_losses)) if train_component_bal_losses else float("nan")
+                ),
                 "memory_gib": float(max(memory_usages) if memory_usages else 0.0),
                 "T": float(model.T),
+                "skipped_nonfinite_steps": skipped_nonfinite_steps,
             }
             beta = model.beta
             if beta is not None:
@@ -192,8 +211,8 @@ def train(cfg) -> dict:
                             stale.path.unlink()
 
             if (
-                int(cfg.get("plot_every_n_epochs", 10)) > 0
-                and ((epoch + 1) % int(cfg.get("plot_every_n_epochs", 10)) == 0 or epoch == 0)
+                plotting_enabled
+                and ((epoch + 1) % plot_every_n_epochs == 0 or epoch == 0)
                 and int(cfg.x_dim) in (1, 2)
             ):
                 if not plotting_available():
@@ -275,7 +294,7 @@ def train(cfg) -> dict:
                 wandb.log(epoch_metrics, step=epoch)
             print(json.dumps(epoch_metrics))
 
-        if plotting_available():
+        if plotting_enabled and plotting_available():
             save_metric_history_plots(history=history, output_dir=metric_plots_dir)
             append_text(text_log_path, f"saved_metric_plots={metric_plots_dir}")
     finally:

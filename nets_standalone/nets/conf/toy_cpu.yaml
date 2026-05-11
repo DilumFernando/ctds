@@ -9,7 +9,7 @@ learnable_hiddens: [16, 16]
 target: symmetric_gmm_2d
 target_nmodes: 2
 target_scale: 4.0
-target_std: 0.5
+target_covariance: 0.25
 cov_scale: 1.0
 source_std: 2.0
 
