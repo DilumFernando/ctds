@@ -5,6 +5,7 @@ from pathlib import Path
 import torch
 
 PLOT_LIMIT = 20.0
+METRIC_PLOT_IGNORE_KEYS = {"val_w2", "T", "memory_gib"}
 
 try:
     import matplotlib
@@ -90,13 +91,13 @@ def save_weighted_trajectory_plot(
         right_ax.set_ylabel("y")
         right_ax.set_aspect("equal", adjustable="box")
         if target_modes_cpu is not None:
-            right_ax.scatter(
+            left_ax.scatter(
                 target_modes_cpu[:, 0],
                 target_modes_cpu[:, 1],
                 marker="x",
                 s=180,
                 linewidths=4.0,
-                color="black",
+                color="red",
                 alpha=0.95,
                 zorder=5,
             )
@@ -104,11 +105,11 @@ def save_weighted_trajectory_plot(
                 target_modes_cpu[:, 0],
                 target_modes_cpu[:, 1],
                 marker="x",
-                s=120,
-                linewidths=2.6,
-                color="#00e5ff",
-                alpha=0.98,
-                zorder=6,
+                s=180,
+                linewidths=4.0,
+                color="red",
+                alpha=0.95,
+                zorder=5,
             )
 
         shared_xlim = (-PLOT_LIMIT, PLOT_LIMIT)
@@ -165,25 +166,15 @@ def save_weighted_trajectory_plot(
                 marker="x",
                 s=180,
                 linewidths=4.0,
-                color="black",
+                color="red",
                 alpha=0.95,
                 zorder=5,
-            )
-            left_ax.scatter(
-                target_modes_cpu[:, 0],
-                torch.zeros_like(target_modes_cpu[:, 0]),
-                marker="x",
-                s=120,
-                linewidths=2.6,
-                color="#00e5ff",
-                alpha=0.98,
-                zorder=6,
             )
 
         shared_x_range = (-PLOT_LIMIT, PLOT_LIMIT)
         left_ax.set_xlim(shared_x_range)
         left_ax.set_ylim(bottom=0.0)
-        left_ax.legend(loc="upper right")
+        left_ax.legend(loc="center right")
 
     if x_dim == 2:
         left_ax.set_title("Particles colored by weights")
@@ -284,10 +275,13 @@ def save_metric_history_plots(history: list[dict], output_dir: str | Path) -> No
     metric_keys = []
     for row in history:
         for key in row.keys():
-            if key != "epoch" and key not in metric_keys:
+            if (
+                key != "epoch"
+                and key not in metric_keys
+                and key not in METRIC_PLOT_IGNORE_KEYS
+                and not key.startswith("target_mode_")
+            ):
                 metric_keys.append(key)
-
-    epochs = [row["epoch"] for row in history]
     for metric_key in metric_keys:
         ys = []
         xs = []

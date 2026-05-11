@@ -167,6 +167,7 @@ class OverdampedLangevinProposal(PINNProposal):
             num_samples=ts.shape[0],
             record_every=self.record_every,
             use_tqdm=kwargs.pop("use_tqdm", True),
+            grad_enabled=kwargs.pop("grad_enabled", False),
             **kwargs,
         )
         trajectory = trajectory[:, :, : self.x_dim]
@@ -200,6 +201,41 @@ class ManualAnnealingScheduler:
                 self.epochs_since_update = 0
 
 
+class LinearAnnealingScheduler:
+    def __init__(self, start_T: float, dT: float, epochs_per_T: int):
+        self._T = start_T
+        self.dT = dT
+        self.epochs_per_T = epochs_per_T
+        self.epochs_since_update = 0
+
+    @property
+    def T(self) -> float:
+        return self._T
+
+    def step(self) -> None:
+        self.epochs_since_update += 1
+        if self.epochs_since_update >= self.epochs_per_T:
+            if self._T < 1.0:
+                self._T = min(1.0, self._T + self.dT)
+            self.epochs_since_update = 0
+
+
+def build_annealing_scheduler(cfg: Config):
+    scheduler_type = str(cfg.get("annealing_scheduler", "manual"))
+    if scheduler_type == "manual":
+        return ManualAnnealingScheduler(
+            list(cfg.T_schedule),
+            list(cfg.epochs_per_T),
+        )
+    if scheduler_type == "linear":
+        return LinearAnnealingScheduler(
+            float(cfg.start_T),
+            float(cfg.dT),
+            int(cfg.epochs_per_T),
+        )
+    raise ValueError("Standalone repo only includes manual and linear annealing schedulers.")
+
+
 class NETSModel(nn.Module):
     def __init__(self, cfg: Config):
         super().__init__()
@@ -221,15 +257,20 @@ class NETSModel(nn.Module):
             t_fourier_dim=int(cfg.t_fourier_dim),
             t_fourier_sigma=float(cfg.t_fourier_sigma),
         )
-        self.annealing_scheduler = ManualAnnealingScheduler(
-            list(cfg.T_schedule),
-            list(cfg.epochs_per_T),
-        )
+        self.annealing_scheduler = build_annealing_scheduler(cfg)
         self.integration_avg_dt = float(cfg.avg_dt)
 
     @property
     def T(self) -> float:
         return self.annealing_scheduler.T
+
+    @property
+    def beta(self) -> float | None:
+        prior = getattr(self.density_path, "prior", None)
+        if prior is None or not hasattr(prior, "beta"):
+            return None
+        t = torch.tensor([[self.T]], device=module_device(self) or torch.device("cpu"), dtype=torch.float32)
+        return float(prior.beta(t).mean().item())
 
     def get_integration_ts(self, T: float) -> Tensor:
         num_integration_steps = math.ceil(T / self.integration_avg_dt)
@@ -268,16 +309,28 @@ class NETSModel(nn.Module):
         weights = torch.exp(log_weights)
         return weights / torch.mean(weights, dim=0, keepdim=True)
 
-    def replenish_sample_buffer(self, num_trajectories: int, proposal_type: str, T: float) -> Dict[str, Tensor]:
+    def replenish_sample_buffer(
+        self,
+        num_trajectories: int,
+        proposal_type: str,
+        T: float,
+        detach: bool = True,
+        grad_enabled: bool = False,
+    ) -> Dict[str, Tensor]:
         integration_ts = self.get_integration_ts(T).unsqueeze(0).expand(num_trajectories, -1, 1)
         proposal = self.build_proposal(proposal_type).to(module_device(self))
-        xs, ts, log_weights = proposal.sample(ts=integration_ts)
+        xs, ts, log_weights = proposal.sample(ts=integration_ts, grad_enabled=grad_enabled)
         weights = self.extract_weights(log_weights)
+        if detach:
+            xs = xs.detach()
+            ts = ts.detach()
+            log_weights = log_weights.detach()
+            weights = weights.detach()
         return {
-            "xs": xs.detach(),
-            "ts": ts.detach(),
-            "log_weights": log_weights.detach(),
-            "weights": weights.detach(),
+            "xs": xs,
+            "ts": ts,
+            "log_weights": log_weights,
+            "weights": weights,
         }
 
     @torch.no_grad()
@@ -323,7 +376,50 @@ class NETSModel(nn.Module):
         raw_loss = (dt_Ft + div + (control * score).sum(-1, keepdims=True) + dt_ln_pt) ** 2
         return torch.mean(weights * raw_loss)
 
+    def component_balance_loss(self, xs: Tensor, weights: Tensor) -> Tensor:
+        target_modes = getattr(self.density_path.end_sampleable, "means", None)
+        if target_modes is None:
+            return torch.zeros((), device=xs.device, dtype=xs.dtype)
+
+        nmodes = target_modes.shape[0]
+        uniform = torch.ones(nmodes, device=xs.device, dtype=xs.dtype) / nmodes
+        eps = torch.finfo(xs.dtype).eps
+        assignment_temperature = float(self.cfg.get("component_bal_assignment_temperature", 1.0))
+        mode_losses = []
+
+        for time_idx in range(xs.shape[1]):
+            xt = xs[:, time_idx, :]
+            wt = weights[:, time_idx, 0]
+            wt = wt / torch.sum(wt)
+            distances_sq = torch.cdist(xt, target_modes.to(xt)).square()
+            soft_assignments = torch.softmax(-distances_sq / assignment_temperature, dim=1)
+            mode_mass = torch.sum(wt.unsqueeze(1) * soft_assignments, dim=0)
+            mode_mass = torch.clamp(mode_mass, min=eps)
+            mode_mass = mode_mass / torch.sum(mode_mass)
+            kl = torch.sum(mode_mass * (torch.log(mode_mass) - torch.log(uniform)))
+            mode_losses.append(kl)
+
+        return torch.stack(mode_losses).mean()
+
+    def loss_terms(self, xs: Tensor, ts: Tensor, weights: Tensor) -> Dict[str, Tensor]:
+        pinn = self.pinn_loss(
+            xs.reshape(-1, self.x_dim).detach().clone(),
+            ts.reshape(-1, 1).detach().clone(),
+            weights.reshape(-1, 1).detach().clone(),
+        )
+        component_bal = self.component_balance_loss(xs.detach(), weights.detach())
+        component_bal_lambda = float(self.cfg.get("component_bal_lambda", 0.0))
+        total = pinn + component_bal_lambda * component_bal
+        return {
+            "loss": total,
+            "pinn_loss": pinn,
+            "component_bal_loss": component_bal,
+        }
+
     def compute_train_loss(self, sample_buffer: Optional[Dict[str, Tensor]]) -> Tensor:
+        return self.compute_train_loss_terms(sample_buffer)["loss"]
+
+    def compute_train_loss_terms(self, sample_buffer: Optional[Dict[str, Tensor]]) -> Dict[str, Tensor]:
         if sample_buffer is not None:
             subsample_idxs = torch.randperm(sample_buffer["xs"].shape[0], device=sample_buffer["xs"].device)[
                 : int(self.cfg.train_trajectories)
@@ -341,33 +437,34 @@ class NETSModel(nn.Module):
             ts = sample_buffer["ts"]
             weights = sample_buffer["weights"]
 
-        return self.pinn_loss(
-            xs.reshape(-1, self.x_dim).detach().clone(),
-            ts.reshape(-1, 1).detach().clone(),
-            weights.reshape(-1, 1).detach().clone(),
-        )
+        return self.loss_terms(xs, ts, weights)
 
     def compute_validation_loss(self) -> Tensor:
+        return self.compute_validation_loss_terms()["loss"]
+
+    def compute_validation_loss_terms(self) -> Dict[str, Tensor]:
         sample_buffer = self.replenish_sample_buffer(
             num_trajectories=int(self.cfg.val_trajectories),
             proposal_type="overdamped_langevin",
             T=1.0,
         )
-        return self.pinn_loss(
-            sample_buffer["xs"].reshape(-1, self.x_dim).detach().clone(),
-            sample_buffer["ts"].reshape(-1, 1).detach().clone(),
-            sample_buffer["weights"].reshape(-1, 1).detach().clone(),
+        return self.loss_terms(
+            sample_buffer["xs"],
+            sample_buffer["ts"],
+            sample_buffer["weights"],
         )
 
     @torch.no_grad()
     def validate(self) -> Dict[str, float]:
         device = module_device(self)
-        val_loss = self.compute_validation_loss().item()
+        val_loss_terms = self.compute_validation_loss_terms()
         proposal = self.build_proposal("ode").to(device)
         ode_ts = torch.linspace(0, 1, 250, device=device).view(1, -1, 1)
         ode_ts = ode_ts.expand(int(self.cfg.val_trajectories), -1, 1)
         metrics = proposal.get_metrics(ts=ode_ts, label="val")
-        metrics["val_loss"] = float(val_loss)
+        metrics["val_loss"] = float(val_loss_terms["loss"].item())
+        metrics["val_pinn_loss"] = float(val_loss_terms["pinn_loss"].item())
+        metrics["val_component_bal_loss"] = float(val_loss_terms["component_bal_loss"].item())
         return metrics
 
     def memory_delta_gib(self, start_bytes: int, end_bytes: int) -> float:

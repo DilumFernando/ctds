@@ -45,6 +45,7 @@ x_fourier_sigma: 0.1
 t_fourier_dim: 20
 t_fourier_sigma: 5.0
 
+proposal : overdamped_langevin
 damping: 50.0
 use_jarzynski: true
 

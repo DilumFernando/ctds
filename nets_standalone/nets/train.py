@@ -141,20 +141,25 @@ def train(cfg) -> dict:
             if bool(cfg.use_persistent_sample_buffer):
                 sample_buffer = model.replenish_sample_buffer(
                     num_trajectories=int(cfg.persistent_sample_buffer_trajectories),
-                    proposal_type="overdamped_langevin",
+                    proposal_type=cfg.proposal,
                     T=model.T,
                 )
 
             train_losses = []
+            train_pinn_losses = []
+            train_component_bal_losses = []
             memory_usages = []
             for _ in range(int(cfg.train_steps_per_epoch)):
                 optimizer.zero_grad(set_to_none=True)
                 start_bytes = torch.cuda.memory_allocated() if device.type == "cuda" else 0
-                loss = model.compute_train_loss(sample_buffer)
+                loss_terms = model.compute_train_loss_terms(sample_buffer)
+                loss = loss_terms["loss"]
                 loss.backward()
                 optimizer.step()
                 end_bytes = torch.cuda.memory_allocated() if device.type == "cuda" else 0
                 train_losses.append(float(loss.item()))
+                train_pinn_losses.append(float(loss_terms["pinn_loss"].item()))
+                train_component_bal_losses.append(float(loss_terms["component_bal_loss"].item()))
                 memory_usages.append(model.memory_delta_gib(start_bytes, end_bytes))
 
             scheduler.step()
@@ -163,9 +168,14 @@ def train(cfg) -> dict:
             epoch_metrics = {
                 "epoch": epoch,
                 "train_loss": float(np.mean(train_losses)),
+                "train_pinn_loss": float(np.mean(train_pinn_losses)),
+                "train_component_bal_loss": float(np.mean(train_component_bal_losses)),
                 "memory_gib": float(max(memory_usages) if memory_usages else 0.0),
                 "T": float(model.T),
             }
+            beta = model.beta
+            if beta is not None:
+                epoch_metrics["beta"] = beta
 
             if (epoch + 1) % int(cfg.val_freq) == 0:
                 model.eval()
@@ -183,7 +193,7 @@ def train(cfg) -> dict:
 
             if (
                 int(cfg.get("plot_every_n_epochs", 10)) > 0
-                and (epoch + 1) % int(cfg.get("plot_every_n_epochs", 10)) == 0
+                and ((epoch + 1) % int(cfg.get("plot_every_n_epochs", 10)) == 0 or epoch == 0)
                 and int(cfg.x_dim) in (1, 2)
             ):
                 if not plotting_available():

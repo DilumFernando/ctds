@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextlib import nullcontext
 from typing import Dict, Optional
 
 import torch
@@ -82,7 +83,6 @@ class ForwardProcess(nn.Module, ABC):
             ts,
         )
 
-    @torch.no_grad()
     def sample_with_trajectory(
         self,
         ts: Tensor,
@@ -90,28 +90,31 @@ class ForwardProcess(nn.Module, ABC):
         x0: Optional[Tensor] = None,
         use_tqdm: bool = False,
         record_every: int = 1,
+        grad_enabled: bool = False,
     ) -> tuple[Tensor, Dict[str, Tensor], Tensor]:
-        if x0 is None:
-            if self.source is None or num_samples is None:
-                raise ValueError("A source or explicit x0 is required.")
-            x0 = self.source.sample(num_samples).to(ts)
-        num_samples = x0.shape[0]
-        aux0 = {k: aux.initial_value(num_samples).to(x0) for k, aux in self.auxiliary_processes.items()}
-        x_trajectory, aux_trajectory, ts = self.integrate_with_trajectory(x0, aux0, ts, use_tqdm)
-        if record_every > 1:
-            record_idxs = record_every_indices(ts.shape[1], record_every)
-            x_trajectory = x_trajectory[:, record_idxs]
-            aux_trajectory = {k: v[:, record_idxs] for k, v in aux_trajectory.items()}
-            ts = ts[:, record_idxs]
-        return x_trajectory, aux_trajectory, ts
+        grad_context = nullcontext() if grad_enabled else torch.no_grad()
+        with grad_context:
+            if x0 is None:
+                if self.source is None or num_samples is None:
+                    raise ValueError("A source or explicit x0 is required.")
+                x0 = self.source.sample(num_samples).to(ts)
+            num_samples = x0.shape[0]
+            aux0 = {k: aux.initial_value(num_samples).to(x0) for k, aux in self.auxiliary_processes.items()}
+            x_trajectory, aux_trajectory, ts = self.integrate_with_trajectory(x0, aux0, ts, use_tqdm)
+            if record_every > 1:
+                record_idxs = record_every_indices(ts.shape[1], record_every)
+                x_trajectory = x_trajectory[:, record_idxs]
+                aux_trajectory = {k: v[:, record_idxs] for k, v in aux_trajectory.items()}
+                ts = ts[:, record_idxs]
+            return x_trajectory, aux_trajectory, ts
 
-    @torch.no_grad()
     def sample(
         self,
         ts: Tensor,
         num_samples: Optional[int] = None,
         x0: Optional[Tensor] = None,
         use_tqdm: bool = False,
+        grad_enabled: bool = False,
     ) -> tuple[Tensor, Dict[str, Tensor]]:
         trajectory, aux_trajectory, _ = self.sample_with_trajectory(
             ts=ts,
@@ -119,6 +122,7 @@ class ForwardProcess(nn.Module, ABC):
             x0=x0,
             use_tqdm=use_tqdm,
             record_every=1,
+            grad_enabled=grad_enabled,
         )
         return trajectory[:, -1], {k: v[:, -1] for k, v in aux_trajectory.items()}
 
@@ -148,3 +152,17 @@ class ODEProcess(ForwardDiffusionProcess):
 
     def noise(self, x: Tensor, t: Tensor) -> Tensor:
         return torch.zeros_like(x)
+
+class BrownianMotion(ForwardDiffusionProcess):
+    """
+    Implements the Brownian motion dx_t = noise(t) dW_t
+    """
+
+    def __init__(self, source: Sampleable, auxiliary_processes: Dict[str, AuxiliaryProcess] = {}):
+        super().__init__(source, auxiliary_processes)
+
+    def drift(self, x: Tensor, t: Tensor) -> Tensor:
+        return torch.zeros_like(x)
+    
+    def noise(self, x: Tensor, t: Tensor) -> Tensor:
+        return torch.ones_like(x)

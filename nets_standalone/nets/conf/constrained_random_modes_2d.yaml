@@ -1,17 +1,15 @@
-run_name: nets_asymmetric_two_mode_2d
-run_group: nets_asymmetric
+run_name: nets_constrained_random_modes_2d
+run_group: nets_random_modes
 wandb: false
 wandb_project: null
 
 x_dim: 2
 density_path: learnable_linear
-target: asymmetric_two_mode_gmm
-target_mode_distance: 30.0
-target_small_mode_weight: 0.7
-target_large_mode_weight: 0.3
-target_small_mode_std: 0.5
-target_large_mode_std: 5
-target_randomize_mode_locations: true
+learnable_hiddens: [16, 16]
+target: constrained_random_gmm
+target_mode_weights: [0.5, 0.3, 0.2]
+target_mode_stds: [0.6, 1.2, 2.0]
+target_min_mode_distance: 8.0
 target_seed: 40
 cov_scale: 1.0
 source_std: 1.0
@@ -25,7 +23,7 @@ step_size: 10
 gamma: 0.97
 checkpoint_burn_in_epochs: 10
 save_top_k: 1
-component_bal_lambda: 10.0
+component_bal_lambda: 0.0
 plot_every_n_epochs: 10
 plot_num_trajectories: 24
 plot_min_points: 2000
@@ -47,7 +45,6 @@ divergence_mode: autograd
 
 control_hiddens: [16, 16]
 free_energy_hiddens: [16, 16]
-learnable_hiddens: [16, 16]
 
 use_fourier: false
 x_fourier_dim: 8

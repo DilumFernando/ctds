@@ -73,6 +73,55 @@ class GMM(GMMDensity, Sampleable):
         return self.distribution.sample(torch.Size((num_samples,)))
 
     @classmethod
+    def constrained_random_gmm(
+        cls,
+        dim: int,
+        mode_weights: list[float],
+        mode_stds: list[float],
+        min_mode_distance: float,
+        seed: int,
+        max_tries: int = 10_000,
+    ) -> "GMM":
+        if dim < 1:
+            raise ValueError("dim must be at least 1")
+        if len(mode_weights) != len(mode_stds):
+            raise ValueError("mode_weights and mode_stds must have the same length")
+        if len(mode_weights) == 0:
+            raise ValueError("At least one mode is required")
+
+        generator = torch.Generator().manual_seed(seed)
+        nmodes = len(mode_weights)
+        weights = torch.tensor(mode_weights, dtype=torch.float32)
+        weights = weights / weights.sum()
+        stds = torch.tensor(mode_stds, dtype=torch.float32)
+
+        bounded_min_distance = min(float(min_mode_distance), 2.0 * PLOT_LIMIT)
+        means = []
+        for _ in range(nmodes):
+            accepted = False
+            for _attempt in range(max_tries):
+                candidate = (torch.rand(dim, generator=generator) * 2.0 - 1.0) * PLOT_LIMIT
+                if not means:
+                    means.append(candidate)
+                    accepted = True
+                    break
+                stacked = torch.stack(means, dim=0)
+                distances = torch.linalg.norm(stacked - candidate.unsqueeze(0), dim=1)
+                if torch.all(distances >= bounded_min_distance):
+                    means.append(candidate)
+                    accepted = True
+                    break
+            if not accepted:
+                raise ValueError(
+                    "Could not place all modes within the plotting bounds while satisfying min_mode_distance. "
+                    "Try fewer modes or a smaller min_mode_distance."
+                )
+
+        means = torch.stack(means, dim=0)
+        covs = torch.diag_embed(stds.square().unsqueeze(-1).expand(-1, dim))
+        return cls(means, covs, weights)
+
+    @classmethod
     def asymmetric_two_mode(
         cls,
         dim: int,
@@ -147,3 +196,46 @@ class GMM(GMMDensity, Sampleable):
             cov_scale * FAB_GMM_COVARIANCES,
             torch.ones(FAB_NMODES) / FAB_NMODES,
         )
+
+class WarmStartGMMPrior(Density):
+    def __init__(
+        self,
+        means: Tensor,
+        beta_max: float,
+        beta_decay_rate: float,
+        weights: Tensor | None = None,
+        fixed_beta: bool = False,
+    ):
+        super().__init__()
+        self.register_buffer("means", means)
+        if weights is None:
+            weights = torch.ones(means.shape[0], dtype=means.dtype) / means.shape[0]
+        weights = weights / weights.sum()
+        self.register_buffer("weights", weights)
+        self.beta_max = float(beta_max)
+        self.beta_decay_rate = float(beta_decay_rate)
+        self.fixed_beta = bool(fixed_beta)
+
+    @property
+    def dim(self) -> int:
+        return self.means.shape[1]
+
+    def beta(self, t: Tensor) -> Tensor:
+        if self.fixed_beta:
+            return torch.ones_like(t) * self.beta_max
+        return self.beta_max * torch.pow(2.0, -self.beta_decay_rate * t)
+
+    def start_sampleable(self) -> GMM:
+        variance = 1.0 / self.beta_max
+        std = variance**0.5
+        covs = torch.diag_embed(torch.ones(self.means.shape[0], self.dim, device=self.means.device) * std**2)
+        return GMM(self.means, covs, self.weights)
+
+    def log_density(self, x: Tensor, t: Tensor) -> Tensor:
+        beta_t = self.beta(t)
+        variance_t = 1.0 / beta_t
+        diff = x.unsqueeze(1) - self.means.unsqueeze(0)
+        squared_distance = diff.square().sum(dim=-1)
+        log_weights = torch.log(self.weights).unsqueeze(0)
+        exponent = -0.5 * squared_distance / variance_t
+        return torch.logsumexp(log_weights + exponent, dim=1, keepdim=True)

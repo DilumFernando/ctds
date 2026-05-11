@@ -23,6 +23,7 @@ step_size: 10
 gamma: 0.97
 checkpoint_burn_in_epochs: 10
 save_top_k: 1
+component_bal_lambda: 0.0
 plot_every_n_epochs: 10
 plot_num_trajectories: 24
 plot_min_points: 2000
@@ -51,6 +52,7 @@ x_fourier_sigma: 0.1
 t_fourier_dim: 8
 t_fourier_sigma: 1.0
 
+proposal : overdamped_langevin
 damping: 10.0
 use_jarzynski: true
 
