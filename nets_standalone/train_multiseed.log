@@ -1,0 +1,5 @@
+[2026-05-11 09:17:57,048][matplotlib.font_manager][WARNING] - Matplotlib is building the font cache; this may take a moment.
+[2026-05-11 09:17:59,389][matplotlib.font_manager][INFO] - Failed to extract font properties from /System/Library/Fonts/LastResort.otf: tuple indices must be integers or slices, not str
+[2026-05-11 09:17:59,411][matplotlib.font_manager][INFO] - Failed to extract font properties from /System/Library/Fonts/Apple Color Emoji.ttc: Could not set the fontsize (invalid pixel size; error code 0x17)
+[2026-05-11 09:17:59,437][matplotlib.font_manager][INFO] - Failed to extract font properties from /System/Library/Fonts/Supplemental/NISC18030.ttf: Could not set the fontsize (invalid pixel size; error code 0x17)
+[2026-05-11 09:17:59,527][matplotlib.font_manager][INFO] - generated new fontManager

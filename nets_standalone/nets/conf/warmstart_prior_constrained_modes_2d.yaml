@@ -53,7 +53,7 @@ annealing_scheduler: linear
 start_T : 0.05
 dT : 0.01
 epochs_per_T : 1
-avg_dt: 0.005
+avg_dt: 0.02
 record_every: 20
 divergence_mode: autograd
 

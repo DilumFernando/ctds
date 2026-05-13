@@ -478,6 +478,7 @@ def save_metric_history_plots(history: list[dict], output_dir: str | Path) -> No
                 and key not in metric_keys
                 and key not in METRIC_PLOT_IGNORE_KEYS
                 and not key.startswith("target_mode_")
+                and "_path_t" not in key
             ):
                 metric_keys.append(key)
     for metric_key in metric_keys:
@@ -501,4 +502,75 @@ def save_metric_history_plots(history: list[dict], output_dir: str | Path) -> No
         ax.grid(alpha=0.35, linestyle="--", linewidth=0.8, color="#666666")
         fig.tight_layout()
         fig.savefig(output_dir / f"{metric_key}.png", dpi=180)
+        plt.close(fig)
+
+
+def save_mode_weight_history_plots(mode_weight_history: list[dict], output_dir: str | Path) -> None:
+    if not plotting_available():
+        raise ImportError("matplotlib is not installed. Install it or disable plotting.")
+    if not mode_weight_history:
+        return
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    grouped: dict[tuple[str, int], list[dict]] = {}
+    for row in mode_weight_history:
+        grouped.setdefault((str(row["split"]), int(row["time_idx"])), []).append(row)
+
+    for (split, time_idx), rows in sorted(grouped.items()):
+        modes = sorted({int(row["mode_idx"]) for row in rows})
+        epochs = sorted({int(row["epoch"]) for row in rows})
+        t_values = [float(row["t"]) for row in rows]
+        t_mean = sum(t_values) / len(t_values)
+
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        for mode_idx in modes:
+            by_epoch = {
+                int(row["epoch"]): float(row["mode_weight"])
+                for row in rows
+                if int(row["mode_idx"]) == mode_idx
+            }
+            ys = [by_epoch.get(epoch, float("nan")) for epoch in epochs]
+            ax.plot(epochs, ys, linewidth=2.0, label=f"mode_weight_{mode_idx}")
+            ax.scatter(epochs, ys, s=18)
+
+        ax.set_title(f"{split} mode weights t{time_idx:03d} ({t_mean:.3f})")
+        ax.set_xlabel("epoch")
+        ax.set_ylabel("mode weight")
+        ax.set_ylim(-0.05, 1.05)
+        ax.grid(alpha=0.35, linestyle="--", linewidth=0.8, color="#666666")
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(output_dir / f"{split}_mode_weights_t{time_idx:03d}.png", dpi=180)
+        plt.close(fig)
+
+    for split in sorted({str(row["split"]) for row in mode_weight_history}):
+        split_time_idxs = [time_idx for grouped_split, time_idx in grouped if grouped_split == split]
+        if not split_time_idxs:
+            continue
+        final_time_idx = max(split_time_idxs)
+        final_rows = grouped[(split, final_time_idx)]
+        modes = sorted({int(row["mode_idx"]) for row in final_rows})
+        epochs = sorted({int(row["epoch"]) for row in final_rows})
+
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        for mode_idx in modes:
+            by_epoch = {
+                int(row["epoch"]): float(row["mode_weight"])
+                for row in final_rows
+                if int(row["mode_idx"]) == mode_idx
+            }
+            ys = [by_epoch.get(epoch, float("nan")) for epoch in epochs]
+            ax.plot(epochs, ys, linewidth=2.0, label=f"mode_weight_{mode_idx}")
+            ax.scatter(epochs, ys, s=18)
+
+        ax.set_title(f"{split} final mode weights")
+        ax.set_xlabel("epoch")
+        ax.set_ylabel("mode weight")
+        ax.set_ylim(-0.05, 1.05)
+        ax.grid(alpha=0.35, linestyle="--", linewidth=0.8, color="#666666")
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(output_dir / f"{split}_mode_weights.png", dpi=180)
         plt.close(fig)

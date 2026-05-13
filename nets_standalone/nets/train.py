@@ -24,6 +24,7 @@ from .model import NETSModel
 from .plotting import (
     plotting_available,
     save_metric_history_plots,
+    save_mode_weight_history_plots,
     save_weighted_trajectory_plot,
     save_weights_histogram,
 )
@@ -59,6 +60,12 @@ def append_jsonl(path: Path, metrics: Dict[str, float]) -> None:
         handle.write(json.dumps(metrics) + "\n")
 
 
+def write_jsonl(path: Path, rows: list[dict]) -> None:
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row) + "\n")
+
+
 def append_text(path: Path, line: str) -> None:
     with path.open("a", encoding="utf-8") as handle:
         handle.write(line + "\n")
@@ -77,6 +84,41 @@ def write_csv(path: Path, history: list[Dict[str, float]]) -> None:
         writer.writeheader()
         for row in history:
             writer.writerow(row)
+
+
+def mode_weight_metrics(sample_buffer: dict, target_modes: torch.Tensor | None, label: str) -> tuple[dict, list[dict]]:
+    if target_modes is None:
+        return {}, []
+
+    metrics = {}
+    rows = []
+    xs = sample_buffer["xs"]
+    ts = sample_buffer["ts"]
+    weights = sample_buffer["weights"]
+    target_modes = target_modes.to(xs)
+
+    for time_idx in range(xs.shape[1]):
+        mode_weights = mode_weights_from_samples(
+            samples=xs[:, time_idx, :],
+            modes=target_modes,
+            sample_weights=weights[:, time_idx, 0],
+        )
+        t_value = float(ts[0, time_idx, 0].item())
+        metrics[f"{label}_path_t{time_idx:03d}"] = t_value
+        for mode_idx, mode_weight in enumerate(mode_weights.tolist()):
+            weight = float(mode_weight)
+            metrics[f"{label}_path_t{time_idx:03d}_mode_{mode_idx}_weight"] = weight
+            rows.append(
+                {
+                    "split": label,
+                    "time_idx": time_idx,
+                    "t": t_value,
+                    "mode_idx": mode_idx,
+                    "mode_weight": weight,
+                }
+            )
+
+    return metrics, rows
 
 
 def train(cfg) -> dict:
@@ -106,6 +148,8 @@ def train(cfg) -> dict:
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
     jsonl_log_path = checkpoints_dir / "metrics.jsonl"
     csv_log_path = checkpoints_dir / "metrics.csv"
+    mode_weights_jsonl_path = checkpoints_dir / "mode_weights.jsonl"
+    mode_weights_csv_path = checkpoints_dir / "mode_weights.csv"
     text_log_path = checkpoints_dir / "train.log"
     trajectory_plots_dir = checkpoints_dir / "trajectory_plots"
     weight_plots_dir = checkpoints_dir / "weight_plots"
@@ -113,6 +157,7 @@ def train(cfg) -> dict:
 
     best_checkpoints: list[CheckpointEntry] = []
     history = []
+    mode_weight_history = []
     wandb_run = None
     plotting_warning_logged = False
     cached_target_plot: dict[str, torch.Tensor] | None = None
@@ -196,10 +241,35 @@ def train(cfg) -> dict:
             if beta is not None:
                 epoch_metrics["beta"] = beta
 
+            target_modes = getattr(model.density_path.end_sampleable, "means", None)
+            train_mode_buffer = sample_buffer
+            if train_mode_buffer is None and target_modes is not None:
+                with torch.no_grad():
+                    train_mode_buffer = model.replenish_sample_buffer(
+                        num_trajectories=int(cfg.train_trajectories),
+                        proposal_type=cfg.proposal,
+                        T=model.T,
+                    )
+            train_mode_metrics, train_mode_rows = mode_weight_metrics(train_mode_buffer, target_modes, "train")
+            epoch_metrics.update(train_mode_metrics)
+            for row in train_mode_rows:
+                mode_weight_history.append({"epoch": epoch, **row})
+
             if (epoch + 1) % int(cfg.val_freq) == 0:
                 model.eval()
                 val_metrics = model.validate()
                 epoch_metrics.update(val_metrics)
+                if target_modes is not None:
+                    with torch.no_grad():
+                        val_mode_buffer = model.replenish_sample_buffer(
+                            num_trajectories=int(cfg.val_trajectories),
+                            proposal_type=cfg.proposal,
+                            T=1.0,
+                        )
+                    val_mode_metrics, val_mode_rows = mode_weight_metrics(val_mode_buffer, target_modes, "val")
+                    epoch_metrics.update(val_mode_metrics)
+                    for row in val_mode_rows:
+                        mode_weight_history.append({"epoch": epoch, **row})
                 if epoch >= int(cfg.checkpoint_burn_in_epochs):
                     checkpoint_path = checkpoints_dir / f"epoch={epoch:03d}-val_w2={val_metrics['val_w2']:.4f}.pt"
                     save_checkpoint(checkpoint_path, model, optimizer, scheduler, epoch, epoch_metrics)
@@ -288,14 +358,17 @@ def train(cfg) -> dict:
             history.append(epoch_metrics)
             append_jsonl(jsonl_log_path, epoch_metrics)
             write_csv(csv_log_path, history)
+            write_jsonl(mode_weights_jsonl_path, mode_weight_history)
+            write_csv(mode_weights_csv_path, mode_weight_history)
             append_text(text_log_path, json.dumps(epoch_metrics))
 
             if wandb_run is not None:
                 wandb.log(epoch_metrics, step=epoch)
             print(json.dumps(epoch_metrics))
 
-        if plotting_enabled and plotting_available():
+        if plotting_available():
             save_metric_history_plots(history=history, output_dir=metric_plots_dir)
+            save_mode_weight_history_plots(mode_weight_history=mode_weight_history, output_dir=metric_plots_dir)
             append_text(text_log_path, f"saved_metric_plots={metric_plots_dir}")
     finally:
         if wandb_run is not None:
@@ -308,5 +381,7 @@ def train(cfg) -> dict:
         "log_dir": str(checkpoints_dir),
         "jsonl_log": str(jsonl_log_path),
         "csv_log": str(csv_log_path),
+        "mode_weights_jsonl": str(mode_weights_jsonl_path),
+        "mode_weights_csv": str(mode_weights_csv_path),
         "text_log": str(text_log_path),
     }
